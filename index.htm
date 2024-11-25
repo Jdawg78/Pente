@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Pente Game</title>
+</head>
+<body>
+  <script src="phaser.min.js"></script> <!-- Or CDN link -->
+  <script>
+    const config = {
+      type: Phaser.AUTO,
+      width: 800,
+      height: 850,
+      backgroundColor: '#3780c4', // White background
+      scene: {
+        create: create,
+      },
+    };
+
+    const game = new Phaser.Game(config);
+
+    function create() {
+      const gridSize = 19;
+      const cellSize = 40; // Each cell is 40x40 pixels
+      const offset = 20;  // Padding around the board
+
+      // Draw the grid
+      for (let i = 0; i < gridSize; i++) {
+        this.add.line(0, 0, offset + i * cellSize, offset, offset + i * cellSize, offset + (gridSize - 1) * cellSize, 0x000000).setOrigin(0);
+        this.add.line(0, 0, offset, offset + i * cellSize, offset + (gridSize - 1) * cellSize, offset + i * cellSize, 0x000000).setOrigin(0);
+      }
+
+      // Store the grid state
+      this.grid = Array(gridSize).fill(null).map(() => Array(gridSize).fill(null));
+
+      // Track stones for removal
+      this.stoneMap = {};
+
+      // Initialize scores
+      this.scores = { black: 0, white: 0 };
+
+      // Display scores
+      this.blackScoreText = this.add.text(10, 810, 'Black: 0', {
+        fontSize: '20px',
+        color: '#000',
+      });
+      this.whiteScoreText = this.add.text(600, 810, 'White: 0', {
+        fontSize: '20px',
+        color: '#000',
+      });
+
+      // Add a winner message
+      this.winnerText = this.add.text(400, 750, '', {
+        fontSize: '24px',
+        color: '#000',
+        fontStyle: 'bold',
+      }).setOrigin(0.5);
+
+      // Add a restart button
+      this.restartButton = this.add.text(400, 700, 'Restart', {
+        fontSize: '20px',
+        color: '#007BFF',
+        backgroundColor: '#E0E0E0',
+        padding: { x: 10, y: 5 },
+      }).setOrigin(0.5).setInteractive();
+
+      this.restartButton.on('pointerdown', () => {
+        this.scene.restart(); // Restart the scene
+      });
+
+      this.restartButton.setVisible(false); // Hide the button initially
+
+      // Automatically place the first stone in the center
+      const center = Math.floor(gridSize / 2);
+      placeStone.call(this, center, center, false); // False to prevent switching turns
+
+      // Add interactivity to place stones
+      this.input.on('pointerdown', (pointer) => {
+        const x = Math.round((pointer.x - offset) / cellSize);
+        const y = Math.round((pointer.y - offset) / cellSize);
+
+        if (x >= 0 && y >= 0 && x < gridSize && y < gridSize && !this.grid[y][x]) {
+          placeStone.call(this, x, y, true);
+        }
+      });
+
+      // Initialize game state
+      this.currentPlayer = 'black'; // White starts after the center black stone
+    }
+
+    function placeStone(x, y, switchTurns = true) {
+      const cellSize = 40;
+      const offset = 20;
+
+      // Snap the stone to the center of the grid cell
+      const stoneX = offset + x * cellSize;
+      const stoneY = offset + y * cellSize;
+
+      // Place a stone
+      const color = this.currentPlayer === 'black' ? 0x000000 : 0xffffff;
+      const stone = this.add.circle(stoneX, stoneY, cellSize / 3, color);
+
+      // Track the stone visually
+      this.stoneMap[`${x},${y}`] = stone;
+
+      // Update grid state
+      this.grid[y][x] = this.currentPlayer;
+
+      // Check for a win
+      if (checkWin.call(this, x, y)) {
+        this.winnerText.setText(`${capitalize(this.currentPlayer)} wins!`);
+        this.input.off('pointerdown'); // Disable further moves
+        this.restartButton.setVisible(true); // Show the restart button
+        return;
+      }
+
+      // Check for captures
+      checkCapture.call(this, x, y);
+
+      // Switch turns
+      if (switchTurns) {
+        this.currentPlayer = this.currentPlayer === 'black' ? 'white' : 'black';
+      }
+    }
+
+    function checkWin(x, y) {
+      const player = this.currentPlayer;
+      const directions = [
+        [1, 0], [0, 1], [1, 1], [1, -1], // Right, Down, Diagonal Down-Right, Diagonal Down-Left
+      ];
+
+      for (const [dx, dy] of directions) {
+        let count = 1;
+
+        // Check one direction
+        count += countStones.call(this, x, y, dx, dy, player);
+
+        // Check the opposite direction
+        count += countStones.call(this, x, y, -dx, -dy, player);
+
+        // If five or more stones are aligned, the player wins
+        if (count >= 5) return true;
+      }
+
+      return false;
+    }
+
+    function countStones(x, y, dx, dy, player) {
+      let count = 0;
+      let nx = x + dx;
+      let ny = y + dy;
+
+      while (isInBounds({ x: nx, y: ny }) && this.grid[ny][nx] === player) {
+        count++;
+        nx += dx;
+        ny += dy;
+      }
+
+      return count;
+    }
+
+    function checkCapture(x, y) {
+      const opponent = this.currentPlayer === 'black' ? 'white' : 'black';
+      const directions = [
+        [1, 0], [0, 1], [1, 1], [1, -1], // Right, Down, Diagonal Down-Right, Diagonal Down-Left
+        [-1, 0], [0, -1], [-1, -1], [-1, 1], // Left, Up, Diagonal Up-Left, Diagonal Up-Right
+      ];
+
+      directions.forEach(([dx, dy]) => {
+        const middle1 = { x: x + dx, y: y + dy };
+        const middle2 = { x: x + 2 * dx, y: y + 2 * dy };
+        const end = { x: x + 3 * dx, y: y + 3 * dy };
+
+        if (isInBounds(middle1) && isInBounds(middle2) && isInBounds(end)) {
+          if (
+            this.grid[middle1.y][middle1.x] === opponent &&
+            this.grid[middle2.y][middle2.x] === opponent &&
+            this.grid[end.y][end.x] === this.currentPlayer
+          ) {
+            // Capture the opponent's stones
+            removeStone.call(this, middle1.x, middle1.y);
+            removeStone.call(this, middle2.x, middle2.y);
+
+            // Update score
+            this.scores[this.currentPlayer] += 2;
+            updateScore.call(this);
+          }
+        }
+      });
+    }
+
+    function updateScore() {
+      this.blackScoreText.setText(`Black: ${this.scores.black}`);
+      this.whiteScoreText.setText(`White: ${this.scores.white}`);
+    }
+
+    function removeStone(x, y) {
+      this.grid[y][x] = null; // Remove from grid
+      const stone = this.stoneMap[`${x},${y}`]; // Get the visual stone
+      if (stone) {
+        stone.destroy(); // Remove the visual stone
+        delete this.stoneMap[`${x},${y}`]; // Remove from map
+      }
+    }
+
+    function isInBounds(pos) {
+      const gridSize = 19;
+      return pos.x >= 0 && pos.y >= 0 && pos.x < gridSize && pos.y < gridSize;
+    }
+
+    function capitalize(str) {
+      return str.charAt(0).toUpperCase() + str.slice(1);
+    }
+  </script>
+</body>
+</html>
